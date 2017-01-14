@@ -1,5 +1,5 @@
 from unittest import TestCase
-from hdmi2usbmon.device import Hdmi2UsbDevice, which
+from hdmi2usbmon2.device import Hdmi2UsbDevice, which
 
 class TestDevice(TestCase):
 

@@ -3,7 +3,7 @@ import queue
 import unittest
 from unittest import TestCase
 
-from hdmi2usbmon.events import Event, EventDispatcher, EventHandler, EventTypeHandler
+from hdmi2usbmon2.events import Event, EventDispatcher, EventHandler, EventTypeHandler
 
 
 class BasicEvent(Event):

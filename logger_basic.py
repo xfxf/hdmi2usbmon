@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 """
 Basic script to log hdmi2usbd streaming debug/status messages into a rotating log file.
 Requires 'nextgen' hdmi2usb firmware post 15 Jan 2016.

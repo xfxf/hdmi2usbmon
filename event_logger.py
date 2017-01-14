@@ -4,7 +4,7 @@
 import sys
 import argparse
 import logging
-import hdmi2usbmon as mon
+import hdmi2usbmon2 as mon
 
 
 class EventLogger(object):
