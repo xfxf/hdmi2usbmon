@@ -1,11 +1,11 @@
 """
 Basic script to log hdmi2usbd streaming debug/status messages into a rotating log file.
 Requires 'nextgen' hdmi2usb firmware post 15 Jan 2016.
-
-Super early hacky version.  Currently does not handle socket disconnects.
 """
-import sys
 import logging
+import socket
+import sys
+
 from logging.handlers import TimedRotatingFileHandler
 from hdmi2usbmon.device import Hdmi2UsbDevice
 
@@ -38,28 +38,29 @@ if __name__ == "__main__":
     print("Attempting to connect to hdmi2usbd...")
     h = Hdmi2UsbDevice('localhost', 8501)
     h.connect()
+    h.sock.settimeout(5)
     print("Connected.")
 
     device = h.sock.makefile(mode='rwb')
 
-    device.write(b'debug input0 off\r\n')
-    device.write(b'debug input1 off\r\n')
-    device.write(b'status short off\r\n')
+    device.write(b'debug input0 on\r\n')
+    device.write(b'debug input1 on\r\n')
+    device.write(b'status short on\r\n')
     device.flush()
 
     while h.connected:
         try:
             line = device.readline()
-        except OSError:
-            line = None
 
-        if line:
-            line = line.strip()
-            try:
-                logging.info(line.decode('ascii'))
-            except UnicodeDecodeError:
-                # non-ascii byte encountered (i.e. a ^C)
-                logging.info(line)
-        else:
-            pass
+            if line:
+                line = line.strip()
+                try:
+                    logging.info(line.decode('ascii'))
+                except UnicodeDecodeError:
+                    # non-ascii byte encountered (i.e. a ^C)
+                    logging.info(line)
+
+        except socket.timeout:
+            # either not getting data, or connection terminated
+            h.close()
 
