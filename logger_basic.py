@@ -44,6 +44,8 @@ if __name__ == "__main__":
 
     device = h.sock.makefile(mode='rwb')
 
+    device.write(b'\r\n')
+    device.write(b'version\r\n')
     device.write(b'debug input0 on\r\n')
     device.write(b'debug input1 on\r\n')
     device.write(b'status short on\r\n')
