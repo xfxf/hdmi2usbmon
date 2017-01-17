@@ -10,8 +10,13 @@ import tkinter
 import threading
 from collections import OrderedDict
 from copy import deepcopy
-from hdmi2usbmon.device import Hdmi2UsbDevice
 
+
+from hdmi2usbmon.device import Hdmi2UsbDevice
+from blinker import signal
+
+
+signal = signal('event')
 
 class Hdmi2UsbException(Exception): pass
 
@@ -37,8 +42,7 @@ class Hdmi2Usb(object):
     def __init__(self, host, port):
         # parent_device should be device; workaround as using incomplete library
         self.device, self.parent_device = self.get_hdmi2usb(host, port)
-
-    # possible __call__ wrapper to catch socket timeout; reconnect
+        self.readthread = self.run_read_thread()
 
     def get_hdmi2usb(self, host='localhost', port=8501):
         h = Hdmi2UsbDevice(host, port)
@@ -52,9 +56,23 @@ class Hdmi2Usb(object):
     def connected(self):
         return self.parent_device.connected
 
-    def write(self, data):
-       self.device.write(data)
+    def writeline(self, data):
+       """Converts string to byte, sends with \r\n and flushes"""
+       data = data.encode()
+       self.device.write(b'%b\r\n' % data)
        self.device.flush()
+
+    def run_read_thread(self):
+        """Runs thread that repeatedly reads from serial device"""
+        thread = threading.Thread(target=self.read_from_device)
+        thread.start()
+        return thread
+
+    def read_from_device(self):
+        while self.connected:
+            line = self.readline()
+            if line:
+                signal.send(line)
 
     def readline(self):
         try:
@@ -68,10 +86,8 @@ class Hdmi2Usb(object):
     def connect_input_output(self, input, output):
         if input in self.inputs and output in self.outputs:
             print("Connecting {} to {}...".format(input, output))
-            input = input.encode()
-            output = output.encode()
-            self.write(b'%b on\r\n' % input)
-            self.write(b'video_matrix connect %b %b\r\n' % (input, output))
+            self.writeline('%s on' % input)
+            self.writeline('video_matrix connect %s %s' % (input, output))
         else:
             raise Hdmi2UsbException('Invalid input or output')
 
@@ -79,13 +95,12 @@ class Hdmi2Usb(object):
         if output in self.outputs:
             print("Turning output {} off...".format(output))
             output = output.encode()
-            self.write(b'%b off\r\n' % output)
+            self.writeline('%s off' % output)
 
     def enable_device_info(self):
-        self.write(b'debug input0 on\r\n')
-        self.write(b'debug input1 on\r\n')
-        self.write(b'status short on\r\n')
-        self.flush()
+        for input in self.inputs:
+            self.writeline('debug %s on' % input)
+        self.writeline('status short on')
 
     @property
     def inputs(self):
@@ -101,8 +116,9 @@ class Hdmi2UsbControlUI(object):
     def __init__(self, host, port):
         self.device = Hdmi2Usb(host, port)
         self.root = self.draw_root_window()
-        self.debug = None
-        self.readthread = self.run_read_thread()
+        self.debug_text = None
+
+        self.device.enable_device_info()
         self.draw_all_widgets()
 
     def draw_all_widgets(self):
@@ -113,26 +129,20 @@ class Hdmi2UsbControlUI(object):
             frames[output].pack(side=tkinter.TOP)
             Hdmi2UsbControlUIOutputElement(self.device, frames[output], output)
 
-        debug_frame, self.debug = self.draw_debug_window(self.root)
+        debug_frame, self.debug_text = self.draw_debug_window(self.root)
         debug_frame.pack(side=tkinter.TOP)
-
-    def run_read_thread(self):
-        thread = threading.Thread(target=self.read_from_device)
-        thread.start()
-        return thread
-
-    def read_from_device(self):
-        while self.device.connected:
-            line = self.device.readline()
-            if line:
-                self.debug.insert(tkinter.END, line)
-                self.debug.see(tkinter.END)
 
     def draw_debug_window(self, root):
         debug_frame = tkinter.LabelFrame(root, text='HDMI2USB Debug')
-        debug = tkinter.Text(debug_frame, width=120, height=20)
-        debug.pack(side=tkinter.TOP)
-        return debug_frame, debug
+        debug_text = tkinter.Text(debug_frame, width=120, height=20)
+        debug_text.pack(side=tkinter.TOP)
+        return debug_frame, debug_text
+
+    @signal.connect
+    def event_process(line, *args, **kwargs):
+        print(line, *args, **kwargs)
+        self.debug.insert(tkinter.END, line)
+        self.debug.see(tkinter.END)
 
         """
         confirm_button = tkinter.Button(frame_bottom,
@@ -173,7 +183,6 @@ class Hdmi2UsbControlUIOutputElement(object):
 
     def gen_output_buttons(self, base, items):
         for item, name in items.items():
-            print(item, name)
             self.matrix_buttons[item] = tkinter.Button(
                 base,
                 text=name,
@@ -183,8 +192,9 @@ class Hdmi2UsbControlUIOutputElement(object):
             self.matrix_buttons[item].config(width=20)
 
     def confirm_matrix_select(self, input):
-        if input is not self.selected_input and input in self.device.inputs:
-            if self.selected_input:
+        if input in self.device.inputs:
+            print(input, self.selected_input)
+            if self.selected_input and input is not self.selected_input:
                 self.matrix_buttons[self.selected_input].config(relief=tkinter.RAISED)
             self.selected_input = input
             self.matrix_buttons[input].config(relief=tkinter.SUNKEN)
@@ -192,8 +202,8 @@ class Hdmi2UsbControlUIOutputElement(object):
         elif input == 'off':
             if self.selected_input:
                 self.matrix_buttons[self.selected_input].config(relief=tkinter.RAISED)
-                self.selected_input = None
-                self.device.output_off(self.output)
+            self.device.output_off(self.output)
+            self.selected_input = 'off'
             self.matrix_buttons[input].config(relief=tkinter.SUNKEN)
 
 
