@@ -8,15 +8,13 @@ import socket
 import sys
 import tkinter
 import threading
+import re
+
 from collections import OrderedDict
 from copy import deepcopy
 
-
 from hdmi2usbmon.device import Hdmi2UsbDevice
-from blinker import signal
 
-
-signal = signal('event')
 
 class Hdmi2UsbException(Exception): pass
 
@@ -39,10 +37,23 @@ class Hdmi2Usb(object):
         ('encoder', 'USB Capture'),
     ])
 
+    HDMI2USB_STATES = {
+        'input0': None,
+        'input1': None,
+        'output0': None,
+        'output1': None,
+        'edid_primary': None,
+        'edid_secondary': None,
+        'encoder': None,
+        'ddr': None,
+    }
+
     def __init__(self, host, port):
         # parent_device should be device; workaround as using incomplete library
         self.device, self.parent_device = self.get_hdmi2usb(host, port)
         self.readthread = self.run_read_thread()
+        self.state = deepcopy(self.HDMI2USB_STATES)
+        self.event_queue = []
 
     def get_hdmi2usb(self, host='localhost', port=8501):
         h = Hdmi2UsbDevice(host, port)
@@ -69,10 +80,29 @@ class Hdmi2Usb(object):
         return thread
 
     def read_from_device(self):
+        # hacky; firmware should have machine readable output mode, don't hard code inputs/outputs/etc
         while self.connected:
             line = self.readline()
             if line:
-                signal.send(line)
+                self.state_update(
+                    line,
+                    regex=b'^status1: in0: (?P<input0>.*), in1: (?P<input1>.*), out0: (?P<output0>.*), out1: (?P<output1>.*)\r\n')
+                self.state_update(
+                    line,
+                    regex=b'^status2: EDID: (?P<edid_primary>.*)/(?P<edid_secondary>.*), enc: (?P<encoder>.*), ddr: (?P<ddr>.*)\r\n')
+
+
+    def state_update(self, line, regex):
+        try:
+            result = [ item.groupdict() for item in re.finditer(regex, line) ]
+            if result:
+                for key, value in result[0].items():
+                    if value != self.state.get(key):
+                        #print('changed - %s:%s' % (key, value))
+                        self.state[key] = value
+                        self.event_queue.append({key: value})
+        except ValueError:
+            pass
 
     def readline(self):
         try:
@@ -113,6 +143,8 @@ class Hdmi2Usb(object):
 
 class Hdmi2UsbControlUI(object):
 
+    UPDATE_DELAY = 500
+
     def __init__(self, host, port):
         self.device = Hdmi2Usb(host, port)
         self.root = self.draw_root_window()
@@ -120,6 +152,7 @@ class Hdmi2UsbControlUI(object):
 
         self.device.enable_device_info()
         self.draw_all_widgets()
+        self.root.after(self.UPDATE_DELAY, self.update_hdmi2usb_state)
 
     def draw_all_widgets(self):
         frames = {}
@@ -138,24 +171,13 @@ class Hdmi2UsbControlUI(object):
         debug_text.pack(side=tkinter.TOP)
         return debug_frame, debug_text
 
-    @signal.connect
-    def event_process(line, *args, **kwargs):
-        print(line, *args, **kwargs)
-        self.debug.insert(tkinter.END, line)
-        self.debug.see(tkinter.END)
-
-        """
-        confirm_button = tkinter.Button(frame_bottom,
-                                          text='CONFIRM',
-                                          command=self.confirm_matrix_select)
-        confirm_button.pack()
-        self.root.bind('<Return>', self.confirm_matrix_select())
-
-        bottom_label = tkinter.Label(frame_bottom,
-                                     text='Select an input + output, then CONFIRM')
-        bottom_label.pack(side=tkinter.BOTTOM)
-        """
-        self.root.focus_set()
+    def update_hdmi2usb_state(self):
+        while self.device.event_queue:
+            event = self.device.event_queue.pop()
+            for key, value in event.items():
+                self.debug_text.insert(tkinter.END, '%s: %s\n' % (key, value))
+                self.debug_text.see(tkinter.END)
+        self.root.after(self.UPDATE_DELAY, self.update_hdmi2usb_state)
 
     def draw_root_window(self):
         root = tkinter.Tk()
@@ -163,8 +185,6 @@ class Hdmi2UsbControlUI(object):
         root.wm_title("HDMI2USB Control")
         return root
 
-"""
-"""
 
 class Hdmi2UsbControlUIOutputElement(object):
 
