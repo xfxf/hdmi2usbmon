@@ -37,16 +37,16 @@ class Hdmi2Usb(object):
         ('encoder', 'USB Capture'),
     ])
 
-    HDMI2USB_STATES = {
-        'input0': None,
-        'input1': None,
-        'output0': None,
-        'output1': None,
-        'edid_primary': None,
-        'edid_secondary': None,
-        'encoder': None,
-        'ddr': None,
-    }
+    HDMI2USB_STATES = OrderedDict([
+        ('input0', None),
+        ('input1', None),
+        ('output0', None),
+        ('output1', None),
+        ('edid_primary', None),
+        ('edid_secondary', None),
+        ('encoder', None),
+        ('ddr', None),
+    ])
 
     def __init__(self, host, port):
         # parent_device should be device; workaround as using incomplete library
@@ -149,14 +149,23 @@ class Hdmi2UsbControlUI(object):
         self.device = Hdmi2Usb(host, port)
         self.root = self.draw_root_window()
         self.debug_text = None
+        self.statelabels = {}
 
         self.device.enable_device_info()
         self.draw_all_widgets()
         self.root.after(self.UPDATE_DELAY, self.update_hdmi2usb_state)
 
     def draw_all_widgets(self):
-        frames = {}
 
+        state_frame = tkinter.LabelFrame(self.root, text='Status')
+        state_frame.pack(side=tkinter.TOP)
+
+        for name, state in self.device.HDMI2USB_STATES.items():
+            text = '{}: {}'.format(name, state)
+            self.statelabels[name] = tkinter.Label(state_frame, text=text, width=60, height=1)
+            self.statelabels[name].pack(side=tkinter.TOP)
+
+        frames = {}
         for output, name in self.device.MATRIX_OUTPUTS.items():
             frames[output] = tkinter.LabelFrame(self.root, text=name, width=60, height=60)
             frames[output].pack(side=tkinter.TOP)
@@ -175,6 +184,10 @@ class Hdmi2UsbControlUI(object):
         while self.device.event_queue:
             event = self.device.event_queue.pop()
             for key, value in event.items():
+                try:
+                    self.statelabels[key].config(text='{}: {}'.format(key, value.decode()))
+                except KeyError:
+                    pass
                 self.debug_text.insert(tkinter.END, '%s: %s\n' % (key, value))
                 self.debug_text.see(tkinter.END)
         self.root.after(self.UPDATE_DELAY, self.update_hdmi2usb_state)
